@@ -1,3 +1,15 @@
 name: BoatMod
 main: com.torandi.boatmod.BoatMod
 version: 0.1
+
+commands:
+  movboat:
+    description: Moves the {id} boat
+    usage: /<command> {id} [xyz][+-]?
+    permission: <plugin name>.movboat
+    permission-message: You don't have the permission to do that
+    
+permissions:
+  movboat:
+    description: Allows the player to move a boat without any real world input
+    default: op

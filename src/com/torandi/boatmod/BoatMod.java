@@ -3,11 +3,11 @@ package com.torandi.boatmod;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.bukkit.Material;
 import org.bukkit.block.*;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
 import org.bukkit.event.*;
 import org.bukkit.event.block.BlockRedstoneEvent;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -78,6 +78,67 @@ public class BoatMod extends JavaPlugin implements Listener {
 
         log.info("Enabled BoatMod.");
         getServer().getPluginManager().registerEvents(this, this);
+        getServer().getScheduler().scheduleSyncRepeatingTask(this, new BoatRunner(this) , BoatRunner.RUNNER_DELAY, BoatRunner.RUNNER_DELAY);
+    }
+
+    @Override
+    public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
+        if(cmd.getName().equalsIgnoreCase("movboat")) {
+            int id;
+            Boat boat = null;
+            try {
+                id = Integer.parseInt(args[0]);
+                boat = boats.get(id);
+            } catch (NumberFormatException ex) {
+                sender.sendMessage("Invalid boat id ("+args[0]+")");
+                return true;
+            }
+            
+            if(boat == null) {
+                sender.sendMessage("Invalid boat id");
+                return true;
+            }
+            
+            if(args[1].length() > 2) {
+                sender.sendMessage("Invalid movement. Valid movements are [xyz][+-]?");
+                return true;
+            }
+            
+            BlockFace dir=null;
+            switch(args[1].charAt(0)) {
+                case 'x':
+                    dir= BlockFace.SOUTH;
+                    break;
+                case 'y':
+                    dir = BlockFace.UP;
+                    break;
+                case 'z':
+                    dir = BlockFace.WEST;
+                    break;
+                default:
+                    sender.sendMessage("Invalid direction: "+args[1].charAt(0));
+                    return true;
+            }
+            
+            if(args[1].length() == 2) {
+                switch(args[1].charAt(1)) {
+                    case '+':
+                        break;
+                    case '-':
+                        dir = dir.getOppositeFace();
+                        break;
+                    default:
+                        sender.sendMessage("Invalid direction modification: "+args[1].charAt(1));
+                        return true;
+                }
+            }
+            sender.sendMessage("Move boat 1 step in direction "+dir.name());
+            
+            boat.move(Position.fromBlockFace(dir));
+            
+            return true;
+        }
+        return false;
     }
 
     @Override

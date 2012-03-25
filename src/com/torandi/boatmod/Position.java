@@ -1,9 +1,14 @@
 package com.torandi.boatmod;
 
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 
 public class Position {
     private int x, y, z;
+    
+    public static Position fromBlockFace(BlockFace bf) {
+        return new Position(bf.getModX(), bf.getModY(), bf.getModZ());
+    }
     
     public static Position fromBlock(Block b) {
         return new Position(b.getX(), b.getY(), b.getZ());
