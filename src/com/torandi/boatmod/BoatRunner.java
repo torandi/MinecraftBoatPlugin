@@ -18,6 +18,9 @@ public class BoatRunner implements Runnable {
             mov.execute(plugin);
         }
         plugin.movments.clear();
+      /* for(Boat b : plugin.boats) {
+            b.update_speed_signs();
+        }*/
     }
     
 }

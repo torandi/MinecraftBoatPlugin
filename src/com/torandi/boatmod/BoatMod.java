@@ -37,6 +37,7 @@ public class BoatMod extends JavaPlugin implements Listener {
     static Material[] waterMaterials = {Material.WATER, Material.STATIONARY_WATER};
     static Material[] movableSpace = {Material.WATER, Material.STATIONARY_WATER, Material.AIR};
     
+    static Material[] signMaterial = {Material.SIGN, Material.SIGN_POST};
     static Material[] engineMaterials = {Material.IRON_BLOCK};
     
     static int constructor_surround[][] = {{1,0}, {0,1}, {-1, 0}, {0, -1}};

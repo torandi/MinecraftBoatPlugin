@@ -1,6 +1,7 @@
 
 package com.torandi.boatmod;
 
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -9,6 +10,7 @@ import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.Furnace;
+import org.bukkit.block.Sign;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
@@ -18,10 +20,10 @@ import org.bukkit.util.Vector;
 
 public class Boat implements Runnable{
     public final static long RUN_DELAY = 10L;
-    public final static float ENGINE_POWER = 10.f;
+    public final static float ENGINE_POWER = 5.f;
     public final static float MAX_SPEED = 5;
     public final static float MAX_ROT_SPEED = 1;
-    public final static float WATER_FRICTION = 0.05f;
+    public final static float WATER_FRICTION = 0.4f;
     
     static enum EngineType {
         DIRECTIONAL,
@@ -47,11 +49,13 @@ public class Boat implements Runnable{
     
     
     private ArrayList<Engine> engines;
+    private ArrayList<Position> speed_signs; //Update signs at these position with speed data
     
     public Boat(BoatMod plugin, Block core, Block connector) throws BoatError {
         
         blocks = new HashMap<Position, BlockData>();
         engines = new ArrayList<Engine>();
+        speed_signs = new ArrayList<Position>();
         
         this.plugin = plugin;
         position = Position.fromBlock(core);
@@ -63,7 +67,7 @@ public class Boat implements Runnable{
         if(!recursive_add(new Position(0,0,0), Position.fromBlock(connector,position))) {
             destroy();
             throw new BoatError();
-        }       
+        }
     }
     
     public final void addBlock(Block b) {
@@ -82,6 +86,14 @@ public class Boat implements Runnable{
                 plugin.log.info("Type: "+e.getType()+", Direction: "+e.getDirection());
                 engines.add(e);
             } catch (BoatError ex) {}
+        }
+        
+        if(BoatMod.contains_material(b.getType(), BoatMod.signMaterial)) {
+            Sign sign = (Sign)b.getState();
+            if(sign.getLine(0).toLowerCase().startsWith("speed")) {
+                plugin.log.info("Found speed sign");
+                speed_signs.add(pos);
+            }
         }
        
         ++weigth;
@@ -103,6 +115,7 @@ public class Boat implements Runnable{
     public boolean move(Position movement) {     
         Movement update = new Movement(this);
         update.core_block = core_block;
+        
         
         for(Position pos : blocks.keySet()) {
             Position newpos = pos.add(movement);
@@ -135,14 +148,14 @@ public class Boat implements Runnable{
     
     public void accelerate(Position dir) {
         Vector acc = new Vector(dir.getX(), dir.getY(), dir.getZ());
-        acc.multiply(ENGINE_POWER/(float)weigth);
+        acc.multiply(ENGINE_POWER/log2(weigth));
         
         speed.add(acc);
     }
     
     //direction = -1/1
     public void increase_rotation(int direction) {
-        rot_speed+=ENGINE_POWER/(float)weigth;
+        rot_speed+=ENGINE_POWER/log2(weigth);
     }
      
     /**
@@ -185,16 +198,18 @@ public class Boat implements Runnable{
         return "{ Boat, weigth: "+weigth+", in water: "+inWater+" }";
     }
 
+    private float log2(float x) {
+        return (float)(Math.log(x)/Math.log(2));
+    }
+    
     @Override
     public void run() {
-        
-        
         for(Engine e : engines) {
             e.run();
         }
         
         //Water friction:
-        float friction = 1.f/((float)weigth*WATER_FRICTION);
+        float friction = 1.f/(log2(weigth)*WATER_FRICTION);
         if(friction > 0.99f)
             friction = 0.99f;
         if(speed.lengthSquared() < 0.01) 
@@ -218,9 +233,25 @@ public class Boat implements Runnable{
         if(Math.abs(rot_speed) > MAX_ROT_SPEED)
             rot_speed = Math.signum(rot_speed) * MAX_ROT_SPEED;
         
-        plugin.log.info("Speed: "+speed.getX()+", "+speed.getZ());
-        if(speed.getBlockX() > 0 || speed.getBlockY() > 0 || speed.getBlockZ() > 0) {
+        if(Math.abs(speed.getBlockX()) > 0 
+                || Math.abs(speed.getBlockY()) > 0 
+                || Math.abs(speed.getBlockZ()) > 0) {
             move(new Position(speed.getBlockX(), speed.getBlockY(), speed.getBlockZ()));
+        }
+        DecimalFormat df = new DecimalFormat("#.##");
+        plugin.log.info("Speed "+df.format(speed.getX())+", "+df.format(speed.getZ()));
+    }
+    
+    public void update_speed_signs() {
+        DecimalFormat df = new DecimalFormat("#.##");
+        plugin.log.info("Update speed signs: "+df.format(speed.getX())+", "+df.format(speed.getZ()));
+        for(Position p : speed_signs) {
+            Sign sign = (Sign) p.getRelative(core_block.getBlock()).getState();
+            sign.setLine(0, "Speed:");
+            sign.setLine(1, "X: "+df.format(speed.getX())+", Y:"+df.format(speed.getZ()).toString());
+            sign.setLine(2, "Rotation speed:");
+            sign.setLine(3, df.format(rot_speed).toString());
+            sign.update();
         }
     }
     
