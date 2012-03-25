@@ -196,7 +196,7 @@ public class Boat implements Runnable{
             }
             plugin.log.info("Set_list:");
             for(Position p : set_list.keySet()) {
-                plugin.log.info(p + " to "+clone_list.get(p));
+                plugin.log.info(p + " to "+set_list.get(p));
             }
             plugin.log.info("unset_list:");
             for(Position p : unset_list) {
@@ -216,6 +216,14 @@ public class Boat implements Runnable{
             for(Position p : clone_list.values()) {
                 Block b = p.getRelative(core);
                 blockdata.put(p, new BlockData(b));
+                //Remove the block:
+                BlockState s = b.getState();
+                if(s instanceof InventoryHolder) {
+                    InventoryHolder ih = (InventoryHolder) s;
+                    ih.getInventory().clear();
+                }
+                s.setType(Material.AIR);
+                s.update(true);
             }
             
             //Clear
