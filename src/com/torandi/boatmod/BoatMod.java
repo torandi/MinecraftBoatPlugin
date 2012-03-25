@@ -3,6 +3,8 @@ package com.torandi.boatmod;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.bukkit.Material;
 import org.bukkit.block.*;
@@ -29,48 +31,51 @@ public class BoatMod extends JavaPlugin implements Listener {
     static Material[] constructorConnectBlock = {Material.IRON_BLOCK};
     
     static Material[] hullMaterials = {Material.LOG, Material.WOOD, Material.IRON_BLOCK};
+    static Material[] waterMaterials = {Material.WATER, Material.STATIONARY_WATER};
     
     static int constructor_surround[][] = {{1,0}, {0,1}, {-1, 0}, {0, -1}};
     
            
-    static int[][] directions = {
-            {-1, 0, 0},
-            {0, 0, -1},
-            {1, 0, 0},
-            {0, 0, 1},
-            {0, 1, 0},
-            {0, -1, 0},
+    static Position[] directions = {
+            new Position(-1, 0, 0),
+            new Position(0, 0, -1),
+            new Position(1, 0, 0),
+            new Position(0, 0, 1),
+            new Position(0, 1, 0),
+            new Position(0, -1, 0),
             
-            {-1, 0, -1},
-            {-1, 0, 1},
-            {1, 0, -1},
-            {1, 0, 1},
+            new Position(-1, 0, -1),
+            new Position(-1, 0, 1),
+            new Position(1, 0, -1),
+            new Position(1, 0, 1),
             
-            {-1, 1, 0},
-            {0, 1, -1},
-            {1, 1, 0},
-            {0, 1, 1},                   
-            {-1, 1, -1},
-            {-1, 1, 1},
-            {1, 1, -1},
-            {1, 1, 1},  
-            {-1, -1, 0},
-            {0, -1, -1},
-            {1, -1, 0},
-            {0, -1, 1},                   
-            {-1, -1, -1},
-            {-1, -1, 1},
-            {1, -1, -1},
-            {1, -1, 1}
+            new Position(-1, 1, 0),
+            new Position(0, 1, -1),
+            new Position(1, 1, 0),
+            new Position(0, 1, 1),                   
+            new Position(-1, 1, -1),
+            new Position(-1, 1, 1),
+            new Position(1, 1, -1),
+            new Position(1, 1, 1),  
+            new Position(-1, -1, 0),
+            new Position(0, -1, -1),
+            new Position(1, -1, 0),
+            new Position(0, -1, 1),                   
+            new Position(-1, -1, -1),
+            new Position(-1, -1, 1),
+            new Position(1, -1, -1),
+            new Position(1, -1, 1)
         };
     
     
     @Override
     public void onEnable() {
-        boats = new ArrayList<Boat>();
-        belonging  = new HashMap<Position, Boat>();
         
         log = this.getLogger();
+        
+        boats = new ArrayList<Boat>();
+        belonging  = new HashMap<Position, Boat>();
+
         log.info("Enabled BoatMod.");
         getServer().getPluginManager().registerEvents(this, this);
     }
@@ -109,10 +114,10 @@ public class BoatMod extends JavaPlugin implements Listener {
                 Block connectorBlock = null;
                 Block nextArmBlock = null;
                 do {
-                    connectorBlock = getAdjacentBlock(curArmBlock, constructorConnectBlock, prev, false);
+                    connectorBlock = getAdjacentBlock(curArmBlock, constructorConnectBlock, prev, 6);
                     if(connectorBlock != null)
                         break;
-                    nextArmBlock = getAdjacentBlock(curArmBlock, constructorArmBlock, prev, false);
+                    nextArmBlock = getAdjacentBlock(curArmBlock, constructorArmBlock, prev, 6);
                     prev = curArmBlock.getState();
                     curArmBlock = nextArmBlock;
                 } while(nextArmBlock != null);
@@ -123,9 +128,15 @@ public class BoatMod extends JavaPlugin implements Listener {
                 }
                 
                 //We found a connector block, check for boat material:
-                Block hull_core = getAdjacentBlock(connectorBlock, hullMaterials, prev, false);
+                Block hull_core = getAdjacentBlock(connectorBlock, hullMaterials, prev, 6);
                 if(hull_core != null) {
                     log.info("Found hull core! ("+hull_core.getType().name()+")");
+                    try {
+                        Boat boat = new Boat(this, hull_core, connectorBlock);
+                        boats.add(boat);
+                    } catch (BoatError ex) {
+                        log.warning("Failed to create boat");
+                    }
                 } else {
                     log.info("No boat connected");
                 }
@@ -137,20 +148,25 @@ public class BoatMod extends JavaPlugin implements Listener {
     /**
      * Tries to find a adjacent block to the given block of the given material
      * @param prev Previous block (block to ignore)
-     * @param all_directions Set to false to only include straight directions
      * @return The block or null
      */
-    public static Block getAdjacentBlock(Block cur, Material[] materials, BlockState prev, boolean all_directions) {   
-        for(int i = 0; i<(all_directions?directions.length:6); ++i) {
-            Block b = cur.getRelative(directions[i][0], directions[i][1], directions[i][2]);
+    public static Block getAdjacentBlock(Block cur, Material[] materials, BlockState prev, int num_directions) {   
+        for(int i = 0; i<num_directions; ++i) {
+            Block b = directions[i].getRelative(cur);
             if(prev == null || !b.getLocation().equals(prev.getLocation())) {
-                for(Material mat : materials) {
-                    if(b.getTypeId() == mat.getId())
-                        return b;
-                }
+                if(contains_material(b.getType(), materials))
+                    return b;
             }
         }
         return null;
+    }
+    
+    public static boolean contains_material(Material mat, Material[] materials) {
+        for(Material m : materials) {
+            if(mat.equals(m))
+                return true;
+        }
+        return false;
     }
     
 }
