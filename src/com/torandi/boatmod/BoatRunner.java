@@ -14,7 +14,10 @@ public class BoatRunner implements Runnable {
     
     @Override
     public void run() {
-        
+        for(Boat.Movement mov : plugin.movments) {
+            mov.execute(plugin);
+        }
+        plugin.movments.clear();
     }
     
 }

@@ -31,7 +31,7 @@ public class Position {
     }
 
     public Position getRelative(Position p) {
-        return new Position(p.x+x, p.y+y, p.z + z);
+        return add(p);
     }
     
     @Override
@@ -46,6 +46,10 @@ public class Position {
     
     public Position subtract(Position p) {
         return new Position(x - p.x, y - p.y, z - p.z);
+    }
+    
+    public Position add(Position p) {
+        return new Position(x + p.x, y + p.y, z + p.z);
     }
 
     public int getX() {

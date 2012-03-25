@@ -3,13 +3,19 @@ package com.torandi.boatmod;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
+import org.bukkit.inventory.ItemStack;
 
 
-public class Boat {
+public class Boat implements Runnable{
+    public final static long RUN_DELAY = 10L;
+    
     private BoatMod plugin;
     private Player creator;
     
@@ -17,7 +23,11 @@ public class Boat {
     private BlockState core_block;
     private HashMap<Position, BlockData> blocks;
     
+    private int inWater = 0;
+    private int weigth = 0;
     private float speed = 0;
+    
+    private int water_line = Integer.MIN_VALUE;
     
     
     private ArrayList<Engine> engines;
@@ -45,7 +55,13 @@ public class Boat {
         BlockData data = new BlockData();
         if(water != null) {
             data.waterContact = Position.fromBlock(water, position);
+            ++inWater;
+            if(pos.getY() <= water_line || BoatMod.getAdjacentBlock(b, BoatMod.waterMaterials, null, 4)!=null) {
+                water_line = Math.max(pos.getY(), water_line);
+            }
         }
+       
+        ++weigth;
         
         blocks.put(pos, data);
         remove_previous_boat(b);
@@ -61,8 +77,40 @@ public class Boat {
         }
     }
     
-    public void move(Position movement) {
+    public boolean move(Position movement) {     
+        Movement update = new Movement(this);
         
+        for(Position pos : blocks.keySet()) {
+            Position newpos = pos.add(movement);
+            if(blocks.containsKey(newpos)
+                    || BoatMod.contains_material(newpos.getRelative(core_block.getBlock()).getType(), BoatMod.movableSpace)
+                    ) {
+                update.clone_list.put(newpos, pos);
+                if(pos.getY() <= water_line) {
+                    update.set_list.put(pos, Material.STATIONARY_WATER);
+                } else {
+                    update.set_list.put(pos, Material.AIR);
+                }
+            } else {
+                //Collision!
+                plugin.log.info("COLLISION!");
+                return false;
+            }
+            update.unset_list.add(pos);
+        }
+        update.clean();
+        
+        //Update blockdata
+        HashMap<Position, BlockData> newblocks = new HashMap<Position, BlockData>();
+        for(Position p : update.clone_list.keySet()) {
+            Position oldpos = update.clone_list.get(p);
+            newblocks.put(p, blocks.get(oldpos));
+        }
+        
+        blocks = newblocks;
+        
+        plugin.movments.push(update);
+        return true;
     }
     
     /**
@@ -81,20 +129,12 @@ public class Boat {
 
             if(!blocks.containsKey(pos) && !pos.equals(connectorPosition)) {
                 Block b = pos.getRelative(core_block.getBlock());
-                if(b.getTypeId() != Material.AIR.getId() 
-                        && !BoatMod.contains_material(b.getType(), BoatMod.waterMaterials)) {
+                if(!BoatMod.contains_material(b.getType(), BoatMod.movableSpace)) {
                     plugin.log.info("Adding block "+pos+" type: "+b.getType().name());
                     //Check if adjacent to water:
                     Block water = BoatMod.getAdjacentBlock(b, BoatMod.waterMaterials, null, 6);
                     if(water != null) {
-                        boolean is_hull = false;
-                        for(Material m : BoatMod.hullMaterials) {
-                            if(b.getTypeId() == m.getId()) {
-                                is_hull = true;
-                                break;
-                            }
-                        }
-                        if(!is_hull) {
+                        if(!BoatMod.contains_material(b.getType(), BoatMod.hullMaterials)) {
                             plugin.getServer().broadcastMessage("Boat Creation: Block at position "+pos+" is not of a valid hull material.");
                             return false;
                         }
@@ -109,6 +149,15 @@ public class Boat {
         return true;
     }
     
+    public String toString() {
+        return "{ Boat, weigth: "+weigth+", in water: "+inWater+" }";
+    }
+
+    @Override
+    public void run() {
+        //Do update logic here!
+    }
+    
     class BlockData {
         Position waterContact = null;
         
@@ -119,5 +168,105 @@ public class Boat {
     
     class Engine {
         Position position;
+    }
+    
+    class Movement {
+        //Clone list is { new_pos => (clone-this-pos)}
+        public HashMap<Position, Position> clone_list =  new HashMap<Position, Position>();
+        public HashMap<Position, Material> set_list = new HashMap<Position, Material>();
+        public HashSet<Position> unset_list = new HashSet<Position>();
+        public Boat boat;
+        
+        Movement(Boat b) {
+            boat = b;
+        }
+        
+        
+        void clean() {
+            for(Position p : clone_list.keySet()) {
+                set_list.remove(p);
+                unset_list.remove(p);
+            }
+        }
+        
+        void debug() {
+            plugin.log.info("Boat.Movement:\nClone list:");
+            for(Position p : clone_list.keySet()) {
+                plugin.log.info(clone_list.get(p) + " => "+p);
+            }
+            plugin.log.info("Set_list:");
+            for(Position p : set_list.keySet()) {
+                plugin.log.info(p + " to "+clone_list.get(p));
+            }
+            plugin.log.info("unset_list:");
+            for(Position p : unset_list) {
+                plugin.log.info(p.toString());
+            }
+        }
+        
+        //Execute the movement, must be run from synchronized thread
+        void execute(BoatMod plugin) {
+            plugin.log.info("Moving boat "+boat.toString());
+            debug();
+            HashMap<Position, BlockData> blockdata = new HashMap<Position, BlockData>();
+            
+            Block core = boat.core_block.getBlock();
+            
+            //Save data
+            for(Position p : clone_list.values()) {
+                Block b = p.getRelative(core);
+                blockdata.put(p, new BlockData(b));
+            }
+            
+            //Clear
+            for(Position p : set_list.keySet()) {
+                BlockState b = p.getRelative(core).getState();
+                if(b instanceof InventoryHolder) {
+                    InventoryHolder ih = (InventoryHolder) b;
+                    ih.getInventory().clear();
+                }
+                b.setType(set_list.get(p));
+                b.update(true);
+            }
+            
+            //Write data
+            for(Position p : clone_list.keySet()) {
+                BlockState to = p.getRelative(core).getState();
+                BlockData from = blockdata.get(clone_list.get(p));
+                
+                //Clear inventory of to:
+                if(to instanceof InventoryHolder) {
+                    InventoryHolder ih = (InventoryHolder) to;
+                    ih.getInventory().clear();
+                }
+                
+                from.set(to);
+            }
+        }
+        
+        private class BlockData {
+            BlockState block;
+            ItemStack[] inventory = null;
+            
+            public BlockData(Block b) {
+                block = b.getState();
+                if(block instanceof InventoryHolder) {
+                    InventoryHolder ih = (InventoryHolder) block;
+                    inventory = ih.getInventory().getContents().clone();
+                }
+            }
+            
+            public void set(BlockState b) {
+                b.setType(block.getType());
+                b.setData(block.getData());
+                b.update(true);
+                if(inventory != null) {
+                    BlockState updated = b.getBlock().getState();
+                    InventoryHolder ih =(InventoryHolder) updated;
+                    ih.getInventory().setContents(inventory);
+                    updated.update(true);
+                }
+            }
+        }
     }
 }

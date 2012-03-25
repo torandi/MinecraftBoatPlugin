@@ -3,6 +3,7 @@ package com.torandi.boatmod;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.logging.Logger;
 import org.bukkit.Material;
 import org.bukkit.block.*;
@@ -20,6 +21,8 @@ public class BoatMod extends JavaPlugin implements Listener {
     //Stores which block belongs to which boat:
     HashMap<Position, Boat> belonging; 
     
+    LinkedList<Boat.Movement> movments; //Movements to execute
+    
     
     /**
      * Blocks to use when searching for constructor
@@ -32,6 +35,7 @@ public class BoatMod extends JavaPlugin implements Listener {
     
     static Material[] hullMaterials = {Material.LOG, Material.WOOD, Material.IRON_BLOCK};
     static Material[] waterMaterials = {Material.WATER, Material.STATIONARY_WATER};
+    static Material[] movableSpace = {Material.WATER, Material.STATIONARY_WATER, Material.AIR};
     
     static int constructor_surround[][] = {{1,0}, {0,1}, {-1, 0}, {0, -1}};
     
@@ -75,6 +79,7 @@ public class BoatMod extends JavaPlugin implements Listener {
         
         boats = new ArrayList<Boat>();
         belonging  = new HashMap<Position, Boat>();
+        movments = new LinkedList<Boat.Movement>();
 
         log.info("Enabled BoatMod.");
         getServer().getPluginManager().registerEvents(this, this);
@@ -84,6 +89,10 @@ public class BoatMod extends JavaPlugin implements Listener {
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
         if(cmd.getName().equalsIgnoreCase("movboat")) {
+            if(args.length != 2) {
+                sender.sendMessage("Usage: /movboat {boatid} [xyz][+-]?");
+                return true;
+            }
             int id;
             Boat boat = null;
             try {
@@ -132,12 +141,20 @@ public class BoatMod extends JavaPlugin implements Listener {
                         return true;
                 }
             }
-            sender.sendMessage("Move boat 1 step in direction "+dir.name());
             
-            boat.move(Position.fromBlockFace(dir));
+            if(!boat.move(Position.fromBlockFace(dir))) {
+                sender.sendMessage("Failed to move boat :(");
+            } else {
+                sender.sendMessage("Move boat 1 step in direction "+dir.name());
+            }
             
             return true;
+        } else if(cmd.getName().equalsIgnoreCase("boats")) {
+            for(int i=0; i < boats.size(); ++i) {
+                sender.sendMessage(i+":  "+boats.get(i));
+            }
         }
+        
         return false;
     }
 
@@ -195,6 +212,7 @@ public class BoatMod extends JavaPlugin implements Listener {
                     try {
                         Boat boat = new Boat(this, hull_core, connectorBlock);
                         boats.add(boat);
+                        getServer().getScheduler().scheduleAsyncRepeatingTask(this, boat, Boat.RUN_DELAY, Boat.RUN_DELAY);
                     } catch (BoatError ex) {
                         log.warning("Failed to create boat");
                     }

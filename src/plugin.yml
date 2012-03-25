@@ -8,8 +8,16 @@ commands:
     usage: /<command> {id} [xyz][+-]?
     permission: <plugin name>.movboat
     permission-message: You don't have the permission to do that
+  boats:
+    description: Lists all boats
+    usage: /<command>
+    permission: <plugin name>.listboats
+    permission-message: You don't have the permission to do that
     
 permissions:
   movboat:
     description: Allows the player to move a boat without any real world input
+    default: op
+  listboats:
+    description: Lists boats
     default: op
