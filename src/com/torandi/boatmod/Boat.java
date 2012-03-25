@@ -14,6 +14,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.material.MaterialData;
+import org.bukkit.util.Vector;
 
 
 public class Boat implements Runnable{
@@ -195,11 +196,14 @@ public class Boat implements Runnable{
                 ItemStack fuel = f.getInventory().getFuel();
                 short fuelTime = fuelTime(fuel);
                 if(fuelTime > 0) {
-                    ItemStack fuel_clone = fuel.clone();
-                    f.getInventory().clear();
-                    fuel_clone.setAmount(fuel_clone.getAmount()-1);
+                    byte data = getFurnaceBlock().getData();
+                    ItemStack[] all_content = f.getInventory().getContents().clone();
+                    getFurnace().getInventory().clear();
                     getFurnaceBlock().setType(Material.BURNING_FURNACE);
-                    getFurnace().getInventory().setFuel(fuel_clone);
+                    getFurnaceBlock().setData(data);
+                    getFurnace().getInventory().setContents(all_content);
+                    fuel = getFurnace().getInventory().getFuel();
+                    fuel.setAmount(fuel.getAmount()-1);
                     getFurnace().setBurnTime(fuelTime);
                     return true;
                 } else {
