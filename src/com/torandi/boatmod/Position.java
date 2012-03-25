@@ -3,7 +3,7 @@ package com.torandi.boatmod;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 
-public class Position {
+public class Position implements Comparable<Position> {
     private int x, y, z;
     
     public static Position fromBlockFace(BlockFace bf) {
@@ -70,5 +70,29 @@ public class Position {
     
     public int hashCode() {
         return x ^ y ^ z;
+    }
+
+    @Override
+    public int compareTo(Position p) {
+        //First order by y
+        if(y < p.y) {
+            return -1;
+        } else if(y > p.y) {
+            return 1;
+        } else {
+            if(x < p.x) {
+                return -1;
+            } else if(x > p.x) {
+                return 1;
+            } else {
+                if(z < p.z) {
+                    return -1;
+                } else if(z > p.z) {
+                    return 1;
+                } else {
+                    return 0;
+                }
+            }
+        }
     }
 }

@@ -4,13 +4,14 @@ package com.torandi.boatmod;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.TreeSet;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.entity.Player;
-import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.material.MaterialData;
 
 
 public class Boat implements Runnable{
@@ -35,14 +36,14 @@ public class Boat implements Runnable{
     public Boat(BoatMod plugin, Block core, Block connector) throws BoatError {
         
         blocks = new HashMap<Position, BlockData>();
+        engines = new ArrayList<Engine>();
         
         this.plugin = plugin;
         position = Position.fromBlock(core);
         core_block = core.getState();
         
         //Add the core block:
-        Block water = BoatMod.getAdjacentBlock(core, BoatMod.waterMaterials, null, 6);
-        addBlock(core, water);
+        addBlock(core);
         
         if(!recursive_add(new Position(0,0,0), Position.fromBlock(connector,position))) {
             destroy();
@@ -50,15 +51,18 @@ public class Boat implements Runnable{
         }       
     }
     
-    public final void addBlock(Block b, Block water) {
+    public final void addBlock(Block b) {
         Position pos = Position.fromBlock(b,position);
         BlockData data = new BlockData();
-        if(water != null) {
-            data.waterContact = Position.fromBlock(water, position);
-            ++inWater;
-            if(pos.getY() <= water_line || BoatMod.getAdjacentBlock(b, BoatMod.waterMaterials, null, 4)!=null) {
+        if(pos.getY() <= water_line || BoatMod.getAdjacentBlock(b, BoatMod.waterMaterials, null, 4)!=null) {
                 water_line = Math.max(pos.getY(), water_line);
-            }
+        }
+        
+        if(b.getType().equals(Material.FURNACE)) {
+            Engine e = new Engine();
+            e.position = pos;
+            plugin.log.info("Found engine at "+pos+", powered: "+b.isBlockPowered()+", indirpower: "+b.isBlockIndirectlyPowered());
+            engines.add(e);
         }
        
         ++weigth;
@@ -79,6 +83,7 @@ public class Boat implements Runnable{
     
     public boolean move(Position movement) {     
         Movement update = new Movement(this);
+        update.core_block = core_block;
         
         for(Position pos : blocks.keySet()) {
             Position newpos = pos.add(movement);
@@ -100,14 +105,8 @@ public class Boat implements Runnable{
         }
         update.clean();
         
-        //Update blockdata
-        HashMap<Position, BlockData> newblocks = new HashMap<Position, BlockData>();
-        for(Position p : update.clone_list.keySet()) {
-            Position oldpos = update.clone_list.get(p);
-            newblocks.put(p, blocks.get(oldpos));
-        }
-        
-        blocks = newblocks;
+        position.add(movement);
+        core_block = movement.getRelative(core_block.getBlock()).getState();
         
         plugin.movments.push(update);
         return true;
@@ -140,7 +139,7 @@ public class Boat implements Runnable{
                         }
                     }
                     //Everything is fine, let's add and recurse!
-                    addBlock(b, water);
+                    addBlock(b);
                     if(!recursive_add(pos, connectorPosition))
                         return false;
                 }
@@ -175,6 +174,7 @@ public class Boat implements Runnable{
         public HashMap<Position, Position> clone_list =  new HashMap<Position, Position>();
         public HashMap<Position, Material> set_list = new HashMap<Position, Material>();
         public HashSet<Position> unset_list = new HashSet<Position>();
+        public BlockState core_block;
         public Boat boat;
         
         Movement(Boat b) {
@@ -209,51 +209,67 @@ public class Boat implements Runnable{
             plugin.log.info("Moving boat "+boat.toString());
             debug();
             HashMap<Position, BlockData> blockdata = new HashMap<Position, BlockData>();
+            TreeSet<Position> positions = new TreeSet<Position>();
             
-            Block core = boat.core_block.getBlock();
+            Block core = core_block.getBlock();
             
             //Save data
             for(Position p : clone_list.values()) {
                 Block b = p.getRelative(core);
                 blockdata.put(p, new BlockData(b));
-                //Remove the block:
-                BlockState s = b.getState();
-                if(s instanceof InventoryHolder) {
+                
+                //Remove the block
+                //I do this to prevent errors with block not allowed to be next to each other
+                // (ex. two chests)
+                /*BlockState s = b.getState();
+                /*if(s instanceof InventoryHolder) {
                     InventoryHolder ih = (InventoryHolder) s;
                     ih.getInventory().clear();
                 }
                 s.setType(Material.AIR);
-                s.update(true);
+                s.update();*/
             }
             
-            //Clear
-            for(Position p : set_list.keySet()) {
-                BlockState b = p.getRelative(core).getState();
-                if(b instanceof InventoryHolder) {
-                    InventoryHolder ih = (InventoryHolder) b;
-                    ih.getInventory().clear();
-                }
-                b.setType(set_list.get(p));
-                b.update(true);
-            }
+            positions.addAll(clone_list.keySet());
+            positions.addAll(set_list.keySet());
+            
+            
+            byte zero = 0;
             
             //Write data
-            for(Position p : clone_list.keySet()) {
-                BlockState to = p.getRelative(core).getState();
-                BlockData from = blockdata.get(clone_list.get(p));
+            for(Position p : positions) {
+                Position clone_pos = clone_list.get(p);
                 
-                //Clear inventory of to:
-                if(to instanceof InventoryHolder) {
-                    InventoryHolder ih = (InventoryHolder) to;
-                    ih.getInventory().clear();
+                if(clone_pos != null) {
+                    Block to = p.getRelative(core);
+                    BlockData from = blockdata.get(clone_pos);
+
+                    //Clear inventory of to:
+                    if(to.getState() instanceof InventoryHolder) {
+                        InventoryHolder ih = (InventoryHolder) to.getState();
+                        ih.getInventory().clear();
+                    }
+                    plugin.log.info("Set "+p+" to "+from.block.getType().name());   
+                    from.set(to);
+                } else {
+                    Material set_mtl = set_list.get(p);
+                    if(set_mtl != null) {
+                        BlockState block = p.getRelative(core).getState();
+                        if(block instanceof InventoryHolder) {
+                            InventoryHolder ih = (InventoryHolder) block;
+                            ih.getInventory().clear();
+                        }
+                        block.setData(new MaterialData(0));
+                        block.setType(set_mtl);
+                        block.update(true);
+                    }
                 }
-                
-                from.set(to);
             }
         }
         
         private class BlockData {
             BlockState block;
+            MaterialData data;
             ItemStack[] inventory = null;
             
             public BlockData(Block b) {
@@ -262,17 +278,17 @@ public class Boat implements Runnable{
                     InventoryHolder ih = (InventoryHolder) block;
                     inventory = ih.getInventory().getContents().clone();
                 }
+                data = block.getData().clone();
             }
             
-            public void set(BlockState b) {
-                b.setType(block.getType());
-                b.setData(block.getData());
-                b.update(true);
+            public void set(Block b) {
+                BlockState state = b.getState();
+                state.setType(block.getType());
+                state.setData(data);
+                state.update(true);
                 if(inventory != null) {
-                    BlockState updated = b.getBlock().getState();
-                    InventoryHolder ih =(InventoryHolder) updated;
+                    InventoryHolder ih =(InventoryHolder) b.getState();
                     ih.getInventory().setContents(inventory);
-                    updated.update(true);
                 }
             }
         }
