@@ -217,17 +217,23 @@ public class Boat implements Runnable{
             for(Position p : clone_list.values()) {
                 Block b = p.getRelative(core);
                 blockdata.put(p, new BlockData(b));
-                
+                plugin.log.info("Save: "+p+" is "+b.getType().name());
+            }
+            
+            for(Position p : clone_list.values()) {
+                Block b = p.getRelative(core);
                 //Remove the block
                 //I do this to prevent errors with block not allowed to be next to each other
                 // (ex. two chests)
-                /*BlockState s = b.getState();
-                /*if(s instanceof InventoryHolder) {
+                BlockState s = b.getState();
+                if(s instanceof InventoryHolder) {
                     InventoryHolder ih = (InventoryHolder) s;
                     ih.getInventory().clear();
                 }
                 s.setType(Material.AIR);
-                s.update();*/
+                 
+                if(!s.update(true))
+                    plugin.log.info("Update failde");
             }
             
             positions.addAll(clone_list.keySet());
@@ -249,7 +255,7 @@ public class Boat implements Runnable{
                         InventoryHolder ih = (InventoryHolder) to.getState();
                         ih.getInventory().clear();
                     }
-                    plugin.log.info("Set "+p+" to "+from.block.getType().name());   
+                    plugin.log.info("Set "+p+" to "+Material.getMaterial(from.type).name());
                     from.set(to);
                 } else {
                     Material set_mtl = set_list.get(p);
@@ -268,27 +274,32 @@ public class Boat implements Runnable{
         }
         
         private class BlockData {
-            BlockState block;
+            int type;
             MaterialData data;
             ItemStack[] inventory = null;
             
             public BlockData(Block b) {
-                block = b.getState();
-                if(block instanceof InventoryHolder) {
-                    InventoryHolder ih = (InventoryHolder) block;
+                BlockState state = b.getState();
+                if(state instanceof InventoryHolder) {
+                    InventoryHolder ih = (InventoryHolder) state;
                     inventory = ih.getInventory().getContents().clone();
                 }
-                data = block.getData().clone();
+                type = b.getTypeId();
+                data = state.getData().clone();
             }
             
             public void set(Block b) {
                 BlockState state = b.getState();
-                state.setType(block.getType());
+                state.setTypeId(type);
                 state.setData(data);
-                state.update(true);
+                if(!state.update(true)) {
+                    plugin.log.warning("Failed to set block to "+Material.getMaterial(type).name());
+                }
+                state = state.getBlock().getState();
                 if(inventory != null) {
-                    InventoryHolder ih =(InventoryHolder) b.getState();
+                    InventoryHolder ih =(InventoryHolder) state;
                     ih.getInventory().setContents(inventory);
+                    state.update(true);
                 }
             }
         }
