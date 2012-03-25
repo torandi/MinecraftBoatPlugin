@@ -9,7 +9,6 @@ import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.Furnace;
-import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
@@ -19,6 +18,15 @@ import org.bukkit.util.Vector;
 
 public class Boat implements Runnable{
     public final static long RUN_DELAY = 10L;
+    public final static float ENGINE_POWER = 10.f;
+    public final static float MAX_SPEED = 5;
+    public final static float MAX_ROT_SPEED = 1;
+    public final static float WATER_FRICTION = 0.05f;
+    
+    static enum EngineType {
+        DIRECTIONAL,
+        ROTATIONAL
+    };
     
     private BoatMod plugin;
     private Player creator;
@@ -29,7 +37,8 @@ public class Boat implements Runnable{
     
     private int inWater = 0;
     private int weigth = 0;
-    private float speed = 0;
+    private Vector speed = new Vector();
+    private float rot_speed = 0;
     
     private int max_x=Integer.MIN_VALUE, max_y=Integer.MIN_VALUE, max_z=Integer.MIN_VALUE;
     private int min_x= Integer.MAX_VALUE, min_y=Integer.MAX_VALUE, min_z=Integer.MAX_VALUE;
@@ -66,14 +75,13 @@ public class Boat implements Runnable{
         }
         
         if(b.getType().equals(Material.FURNACE) || b.getType().equals(Material.BURNING_FURNACE)) {
-            Engine e = new Engine();
-            e.position = pos;
-            plugin.log.info("Found engine at "+pos+", powered: "+b.isBlockPowered()+", indirpower: "+b.isBlockIndirectlyPowered());
-            plugin.log.info("BT: "+e.getFurnace().getBurnTime());
-            if(e.burn()) {
-            plugin.log.info("Burning, burntime: "+e.getFurnace().getBurnTime());    
-            }
-            engines.add(e);
+            Engine e;
+            try {
+                plugin.log.info("Found engine at "+pos+", powered: "+b.isBlockIndirectlyPowered());
+                e = new Engine(pos);
+                plugin.log.info("Type: "+e.getType()+", Direction: "+e.getDirection());
+                engines.add(e);
+            } catch (BoatError ex) {}
         }
        
         ++weigth;
@@ -110,6 +118,7 @@ public class Boat implements Runnable{
             } else {
                 //Collision!
                 plugin.log.info("COLLISION!");
+                speed = speed.zero();
                 //TODO: Handle
                 return false;
             }
@@ -124,6 +133,18 @@ public class Boat implements Runnable{
         return true;
     }
     
+    public void accelerate(Position dir) {
+        Vector acc = new Vector(dir.getX(), dir.getY(), dir.getZ());
+        acc.multiply(ENGINE_POWER/(float)weigth);
+        
+        speed.add(acc);
+    }
+    
+    //direction = -1/1
+    public void increase_rotation(int direction) {
+        rot_speed+=ENGINE_POWER/(float)weigth;
+    }
+     
     /**
      * Unlinks this boat
      */
@@ -166,10 +187,44 @@ public class Boat implements Runnable{
 
     @Override
     public void run() {
-        //Do update logic here!
+        
+        
+        for(Engine e : engines) {
+            e.run();
+        }
+        
+        //Water friction:
+        float friction = 1.f/((float)weigth*WATER_FRICTION);
+        if(friction > 0.99f)
+            friction = 0.99f;
+        if(speed.lengthSquared() < 0.01) 
+            speed = speed.zero();
+        else {
+            speed.multiply(friction);
+        }
+        
+        if(Math.abs(rot_speed) < 0.01) {
+            rot_speed = 0.f;
+        } else {
+            rot_speed *=friction;
+        }
+        
+        if(Math.abs(speed.getX()) > MAX_SPEED)
+            speed.setX(MAX_SPEED*Math.signum(speed.getX()));
+        if(Math.abs(speed.getY()) > MAX_SPEED)
+            speed.setY(MAX_SPEED*Math.signum(speed.getY()));
+        if(Math.abs(speed.getZ()) > MAX_SPEED)
+            speed.setZ(MAX_SPEED*Math.signum(speed.getZ()));
+        if(Math.abs(rot_speed) > MAX_ROT_SPEED)
+            rot_speed = Math.signum(rot_speed) * MAX_ROT_SPEED;
+        
+        plugin.log.info("Speed: "+speed.getX()+", "+speed.getZ());
+        if(speed.getBlockX() > 0 || speed.getBlockY() > 0 || speed.getBlockZ() > 0) {
+            move(new Position(speed.getBlockX(), speed.getBlockY(), speed.getBlockZ()));
+        }
     }
     
-    class BlockData {
+    static class BlockData {
         Position waterContact = null;
         
         boolean hasWaterContact() {
@@ -178,14 +233,58 @@ public class Boat implements Runnable{
     }
     
     class Engine {
-        Position position;
+
+        public Position getDirection() {
+            return direction;
+        }
+
+        public Position getPosition() {
+            return pos;
+        }
+
+        public EngineType getType() {
+            return type;
+        }
+       
+        
+        private Position pos;
+        private Position direction;
+        private EngineType type;
+        
+        public Engine(Position pos) throws BoatError {
+            this.pos = pos;
+            Block b = BoatMod.getAdjacentBlock(pos.getRelative(core_block.getBlock()),
+                    BoatMod.engineMaterials, null, 6);
+            if(b == null) {
+                throw new BoatError();
+            }
+            direction = pos.subtract(Position.fromBlock(b,position));
+            if(direction.getY() == 0) {
+                type = EngineType.DIRECTIONAL;
+            } else {
+                type = EngineType.ROTATIONAL;
+            }
+        }
         
         Block getFurnaceBlock() {
-            return position.getRelative(core_block.getBlock());
+            return pos.getRelative(core_block.getBlock());
         }
         
         Furnace getFurnace() {
-            return (Furnace)position.getRelative(core_block.getBlock()).getState();
+            return (Furnace)pos.getRelative(core_block.getBlock()).getState();
+        }
+        
+        /*
+         * Checks if powered and if so executes the action it should do
+         */
+        void run() {
+            if(getFurnaceBlock().isBlockIndirectlyPowered() && burn() ) {
+                if(type == EngineType.DIRECTIONAL) {
+                    accelerate(direction);
+                } else {
+                    increase_rotation(direction.getY());
+                }
+            }
         }
         
         boolean burn() {
