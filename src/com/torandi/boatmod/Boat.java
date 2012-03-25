@@ -8,6 +8,8 @@ import java.util.TreeSet;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
+import org.bukkit.block.Furnace;
+import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
@@ -27,6 +29,9 @@ public class Boat implements Runnable{
     private int inWater = 0;
     private int weigth = 0;
     private float speed = 0;
+    
+    private int max_x=Integer.MIN_VALUE, max_y=Integer.MIN_VALUE, max_z=Integer.MIN_VALUE;
+    private int min_x= Integer.MAX_VALUE, min_y=Integer.MAX_VALUE, min_z=Integer.MAX_VALUE;
     
     private int water_line = Integer.MIN_VALUE;
     
@@ -56,12 +61,17 @@ public class Boat implements Runnable{
         BlockData data = new BlockData();
         if(pos.getY() <= water_line || BoatMod.getAdjacentBlock(b, BoatMod.waterMaterials, null, 4)!=null) {
                 water_line = Math.max(pos.getY(), water_line);
+                ++inWater;
         }
         
-        if(b.getType().equals(Material.FURNACE)) {
+        if(b.getType().equals(Material.FURNACE) || b.getType().equals(Material.BURNING_FURNACE)) {
             Engine e = new Engine();
             e.position = pos;
             plugin.log.info("Found engine at "+pos+", powered: "+b.isBlockPowered()+", indirpower: "+b.isBlockIndirectlyPowered());
+            plugin.log.info("BT: "+e.getFurnace().getBurnTime());
+            if(e.burn()) {
+            plugin.log.info("Burning, burntime: "+e.getFurnace().getBurnTime());    
+            }
             engines.add(e);
         }
        
@@ -99,6 +109,7 @@ public class Boat implements Runnable{
             } else {
                 //Collision!
                 plugin.log.info("COLLISION!");
+                //TODO: Handle
                 return false;
             }
             update.unset_list.add(pos);
@@ -167,6 +178,45 @@ public class Boat implements Runnable{
     
     class Engine {
         Position position;
+        
+        Block getFurnaceBlock() {
+            return position.getRelative(core_block.getBlock());
+        }
+        
+        Furnace getFurnace() {
+            return (Furnace)position.getRelative(core_block.getBlock()).getState();
+        }
+        
+        boolean burn() {
+            Furnace f = getFurnace();
+            if(f.getBurnTime() > 0)
+                return true;
+            else {
+                ItemStack fuel = f.getInventory().getFuel();
+                short fuelTime = fuelTime(fuel);
+                if(fuelTime > 0) {
+                    ItemStack fuel_clone = fuel.clone();
+                    f.getInventory().clear();
+                    fuel_clone.setAmount(fuel_clone.getAmount()-1);
+                    getFurnaceBlock().setType(Material.BURNING_FURNACE);
+                    getFurnace().getInventory().setFuel(fuel_clone);
+                    getFurnace().setBurnTime(fuelTime);
+                    return true;
+                } else {
+                    return false;
+                }
+            }
+        }
+            
+        //Copied from server code
+        private short fuelTime(ItemStack itemstack) {
+            if (itemstack == null) {
+                return 0;
+            } else {
+                int i = itemstack.getTypeId();
+                return  (short) (i == Material.WOOD.getId() ? 300 : (i == Material.STICK.getId() ? 100 : (i == Material.COAL.getId() ? 1600 : (i == Material.LAVA_BUCKET.getId() ? 20000 : (i == Material.SAPLING.getId() ? 100 : (i == Material.BLAZE_ROD.getId() ? 2400 : 0))))));
+            }
+        }
     }
     
     class Movement {
@@ -232,8 +282,7 @@ public class Boat implements Runnable{
                 }
                 s.setType(Material.AIR);
                  
-                if(!s.update(true))
-                    plugin.log.info("Update failde");
+                s.update(true);
             }
             
             positions.addAll(clone_list.keySet());
@@ -257,6 +306,8 @@ public class Boat implements Runnable{
                     }
                     plugin.log.info("Set "+p+" to "+Material.getMaterial(from.type).name());
                     from.set(to);
+                    //Update boat data:
+                    plugin.belonging.put(clone_pos, boat);
                 } else {
                     Material set_mtl = set_list.get(p);
                     if(set_mtl != null) {
@@ -270,6 +321,10 @@ public class Boat implements Runnable{
                         block.update(true);
                     }
                 }
+            }
+                
+            for(Position p : unset_list) {
+                plugin.belonging.remove(p);
             }
         }
         
