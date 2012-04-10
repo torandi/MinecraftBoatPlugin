@@ -56,13 +56,13 @@ public class Boat implements Runnable{
     
     
     private ArrayList<Engine> engines;
-    private ArrayList<Position> info_signs; //Update signs at these position with info
+    private ArrayList<Position> speed_signs; //Update signs at these position with info
     
     public Boat(BoatMod plugin, Block core, Block connector) throws BoatError {
         
         blocks = new HashMap<Position, BlockData>();
         engines = new ArrayList<Engine>();
-        info_signs = new ArrayList<Position>();
+        speed_signs = new ArrayList<Position>();
         engine_momentum = new Position(0, 0, 0);
         
         this.plugin = plugin;
@@ -106,9 +106,9 @@ public class Boat implements Runnable{
         
         if(BoatMod.contains_material(b.getType(), BoatMod.signMaterial)) {
             Sign sign = (Sign)b.getState();
-            if(sign.getLine(0).toLowerCase().startsWith("info")) {
-                plugin.log.info("Found info sign");
-                info_signs.add(pos);
+            if(sign.getLine(0).toLowerCase().startsWith("speed")) {
+                plugin.log.info("Found speed sign");
+                speed_signs.add(pos);
             }
         }
        
@@ -152,7 +152,10 @@ public class Boat implements Runnable{
 
         
         for(Position pos : blocks.keySet()) {
+            
+            
             Position newpos = pos.add(movement);
+            
             if(blocks.containsKey(newpos)
                     || BoatMod.contains_material(newpos.getRelative(core_block.getBlock()).getType(), BoatMod.movableSpace)
                     ) {
@@ -248,7 +251,6 @@ public class Boat implements Runnable{
         
         for(Engine e : engines) {
             if(e.run()) {
-                plugin.log.info("Engine is on: "+e.getDirection());
                 if(e.isDirectional()) {
                     engine_momentum =  engine_momentum.add(e.getDirection());
                     any_directional = true;
@@ -258,7 +260,10 @@ public class Boat implements Runnable{
             }
         }
         
-        if(any_directional) {
+        //At the moment we can't do both rotational and normal movement at once
+        if(rotation != 0) {
+            plugin.log.info("Rotate "+rotation);
+        } else if(any_directional) {
             int x=0;
             int z=0;
             if(Math.abs(engine_momentum.getX()) >= movement_cost ) {
@@ -286,16 +291,17 @@ public class Boat implements Runnable{
         
     }
     
-    public void update_info_signs() {
-       /* DecimalFormat df = new DecimalFormat("#.##");
-        plugin.log.info("Update speed signs: "+df.format(speed.getX())+", "+df.format(speed.getZ()));
-        for(Position p : speed_signs) {
-            Sign sign = (Sign) p.getRelative(core_block.getBlock()).getState();
-            sign.setLine(0, "Speed:");
-            sign.setLine(1, "X: "+df.format(speed.getX())+", Y:"+df.format(speed.getZ()).toString());
-            sign.setLine(2, "Rotation speed:");
-            sign.setLine(3, df.format(rot_speed).toString());
-            sign.update();
+    public void update_speed_signs() {
+        //DecimalFormat df = new DecimalFormat("#.##");
+        /*for(Position p : speed_signs) {
+            BlockState state = p.getRelative(core_block.getBlock()).getState();
+            if(state instanceof Sign) {
+                Sign sign = (Sign) state;
+                sign.setLine(0, "Speed:");
+                sign.setLine(1, "X: "
+                sign.setLine(2, "Y: "+df.format(speed.getZ()).toString());
+                sign.update();
+            }
         }*/
     }
     
@@ -308,12 +314,31 @@ public class Boat implements Runnable{
     }
     
     class Engine {
+        
+        private Position pos;
+        private Position direction;
+        private EngineType type;
+        
+        public Engine(Position pos) throws BoatError {
+            this.pos = pos;
+            Block b = BoatMod.getAdjacentBlock(pos.getRelative(core_block.getBlock()),
+                    BoatMod.engineMaterials, null, 6);
+            if(b == null) {
+                throw new BoatError();
+            }
+            direction = pos.subtract(Position.fromBlock(b,position));
+            if(direction.getY() == 0) {
+                type = EngineType.DIRECTIONAL;
+            } else {
+                type = EngineType.ROTATIONAL;
+            }
+            last_power_state = getFurnaceBlock().isBlockIndirectlyPowered();
+        }
 
-      
-        //Is set to true if a rising edge is detected by an redstone event,
-        //  should be reset after usage.
+        //Is set to the last power state that was registred
+        //  Is used to detect rising_edge
         //  Only relevant for rotational engine
-        boolean rising_edge = false;
+        boolean last_power_state = false;
             
         public Position getDirection() {
             return direction;
@@ -343,29 +368,15 @@ public class Boat implements Runnable{
             return type == EngineType.ROTATIONAL;
         }
         
-        //Returns rising edge and resets it
-        public boolean getRisingEdge() {
-            boolean tmp = rising_edge;
-            rising_edge = false; //Reset
-            return tmp;
-        }
-        
-        private Position pos;
-        private Position direction;
-        private EngineType type;
-        
-        public Engine(Position pos) throws BoatError {
-            this.pos = pos;
-            Block b = BoatMod.getAdjacentBlock(pos.getRelative(core_block.getBlock()),
-                    BoatMod.engineMaterials, null, 6);
-            if(b == null) {
-                throw new BoatError();
-            }
-            direction = pos.subtract(Position.fromBlock(b,position));
-            if(direction.getY() == 0) {
-                type = EngineType.DIRECTIONAL;
+        //Detects rising edge
+        public boolean detectRisingEdge() {
+            boolean current_power_state = getFurnaceBlock().isBlockIndirectlyPowered();
+            if(last_power_state == false && current_power_state==true) {
+                last_power_state = current_power_state;
+                return true;
             } else {
-                type = EngineType.ROTATIONAL;
+                last_power_state = current_power_state;
+                return false;
             }
         }
         
@@ -392,7 +403,7 @@ public class Boat implements Runnable{
                 if(isDirectional()) {
                     return getFurnaceBlock().isBlockIndirectlyPowered() && burn();
                 } else {//Rotational 
-                    return getRisingEdge() && burn();
+                    return detectRisingEdge() && burn();
                 }
             } catch(EngineError e) {
                 plugin.log.warning("Caught EngineError: "+e.getMessage());
@@ -562,15 +573,16 @@ public class Boat implements Runnable{
             Vector v_min, v_max;
             v_min = min.add(position).toVector();
             v_max = max.add(position).toVector();
-            v_max.setY(v_max.getY()+10);//Include some of the air above
+            
+            //Capture players that are on the edge+a bit above
+            v_max = v_max.add(new Vector(0.5, 5, 0.5));
+            v_min = v_min.subtract(new Vector(0.5, 0, 0.5));
             
             for(Player p : players) {
                 if(p.getLocation().toVector().isInAABB(v_min, v_max)) {
                     plugin.log.info("Move player "+p.getDisplayName());
                     Location newLocation = p.getLocation().add(movement.toVector());
                     p.teleport(newLocation, TeleportCause.PLUGIN);
-                } else {
-                    plugin.log.info("Don't move player "+p.getDisplayName());
                 }
             }
                 
