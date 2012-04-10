@@ -454,18 +454,24 @@ public class Boat implements Runnable{
             p2 = pos2;
         }
         
+        @Override
         public int compareTo(Position2 p) {
             return p1.compareTo(p.p1);
         }
     }
     
-    static class PositionMaterial {
+    static class PositionMaterial implements Comparable<PositionMaterial> {
         public Position pos;
         public Material mtl;
         
         public PositionMaterial(Position p, Material m ){
             pos = p;
             mtl = m;
+        }
+        
+        @Override
+        public int compareTo(PositionMaterial p) {
+            return pos.compareTo(p.pos);
         }
     }
     
