@@ -136,25 +136,45 @@ public class Boat implements Runnable{
         }
     }
     
-    public boolean move(Position movement) {  
+    /*
+     * To do a directional move set rotation to 0
+     * For rotation movement specifies the centerpoint!
+     */
+    public boolean move(Position movement, int rotation) {  
         if(dirty) {
             plugin.log.warning("Trying to move again before previous movement has executed! Performing movements to slow!");
             return false;
         } 
 
-                //Clone list is { new_pos => (clone-this-pos)}
+        //Clone list is { new_pos => (clone-this-pos)}
         HashMap<Position, Position> clone_list =  new HashMap<Position, Position>();
         HashMap<Position, Material> set_list = new HashMap<Position, Material>();
         
         Movement update = new Movement(this);
         update.core_block = core_block;
-        update.movement = movement;
-
+        if(rotation == 0) {
+            update.movement = movement;
+        } else {
+            update.movement = new Position(0,0,0); //Rotation don't have any movement
+        }
         
         for(Position pos : blocks.keySet()) {
             
             
-            Position newpos = pos.add(movement);
+            Position newpos = null;
+            if(rotation == 0) {
+                newpos = pos.add(movement);
+            } else if(rotation > 0) {
+                //In rotations movement are the rotation center
+                newpos = pos.subtract(movement); 
+                newpos = new Position(newpos.getZ(),newpos.getY(), newpos.getX());
+                newpos = newpos.add(movement);
+            } else if(rotation < 0) {
+                //In rotations movement are the rotation center
+                newpos = pos.getRelative(movement); 
+                newpos = new Position(-newpos.getZ(),newpos.getY(), -newpos.getX());
+                newpos = newpos.add(movement);
+            }
             
             if(blocks.containsKey(newpos)
                     || BoatMod.contains_material(newpos.getRelative(core_block.getBlock()).getType(), BoatMod.movableSpace)
@@ -247,6 +267,7 @@ public class Boat implements Runnable{
     @Override
     public void run() {
         int rotation = 0;
+        Position rot_center=null;
         boolean any_directional = false;
         
         for(Engine e : engines) {
@@ -255,14 +276,17 @@ public class Boat implements Runnable{
                     engine_momentum =  engine_momentum.add(e.getDirection());
                     any_directional = true;
                 } else if(e.isRotational()) {
-                    rotation += e.getRotation();
+                    rotation = e.getRotation();
+                    rot_center = e.getPosition();
+                    break; //we can only do one rotation per tick!
                 }
             }
         }
         
         //At the moment we can't do both rotational and normal movement at once
         if(rotation != 0) {
-            plugin.log.info("Rotate "+rotation);
+            plugin.log.info("Rotate "+rotation+" Center: "+rot_center);
+            move(rot_center, rotation);
         } else if(any_directional) {
             int x=0;
             int z=0;
@@ -280,7 +304,7 @@ public class Boat implements Runnable{
                    engine_momentum.getZ()%movement_cost);
             if(x != 0 || z != 0) {
                 //Move!
-                move(new Position(x, 0, z));
+                move(new Position(x, 0, z),0);
             }
         } else {
             //Stop totaly if no engine are on

@@ -150,7 +150,7 @@ public class BoatMod extends JavaPlugin implements Listener {
                 }
             }
             
-            if(!boat.move(Position.fromBlockFace(dir))) {
+            if(!boat.move(Position.fromBlockFace(dir),0)) {
                 sender.sendMessage("Failed to move boat :(");
             } else {
                 sender.sendMessage("Move boat 1 step in direction "+dir.name());
@@ -161,7 +161,41 @@ public class BoatMod extends JavaPlugin implements Listener {
             for(int i=0; i < boats.size(); ++i) {
                 sender.sendMessage(i+":  "+boats.get(i));
             }
-        }
+        } /*else if(cmd.getName().equalsIgnoreCase("rotboat")) {
+            if(args.length != 2) {
+                sender.sendMessage("Usage: /rotboat {boatid} [+-]?");
+                return true;
+            }
+            int id;
+            Boat boat = null;
+            try {
+                id = Integer.parseInt(args[0]);
+                boat = boats.get(id);
+            } catch (NumberFormatException ex) {
+                sender.sendMessage("Invalid boat id ("+args[0]+")");
+                return true;
+            }
+            
+            if(boat == null) {
+                sender.sendMessage("Invalid boat id");
+                return true;
+            }
+            int rot = 0;
+            switch(args[1].charAt(0)) {
+                case 'x':
+                    dir= BlockFace.SOUTH;
+                    break;
+                case 'y':
+                    dir = BlockFace.UP;
+                    break;
+                case 'z':
+                    dir = BlockFace.WEST;
+                    break;
+                default:
+                    sender.sendMessage("Invalid direction: "+args[1].charAt(0));
+                    return true;
+            }
+        }*/
         
         return false;
     }

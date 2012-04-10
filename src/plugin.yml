@@ -8,6 +8,11 @@ commands:
     usage: /<command> {id} [xyz][+-]?
     permission: <plugin name>.movboat
     permission-message: You don't have the permission to do that
+  rotboat:
+    description: Rotate the {id} boat
+    usage: /<command> {id} 1/-1
+    permissions: <plugin name>.movboat
+    permission-message: You don't have the permission to do that
   boats:
     description: Lists all boats
     usage: /<command>
