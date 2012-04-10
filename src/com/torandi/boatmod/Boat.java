@@ -2,14 +2,11 @@
 package com.torandi.boatmod;
 
 import com.torandi.boatmod.Boat.Engine.EngineError;
-import java.text.DecimalFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.TreeSet;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
@@ -28,7 +25,7 @@ public class Boat implements Runnable{
     public final static long RUN_DELAY = 10L; //server ticks / boat tick
     private final static float ENGINE_POWER = 10; //The weigth one engine can move per tick
     
-    private final static boolean debug_movement = false;
+    private final static boolean debug_movement = true;
     
     static enum EngineType {
         DIRECTIONAL,
@@ -144,7 +141,11 @@ public class Boat implements Runnable{
             plugin.log.warning("Trying to move again before previous movement has executed! Performing movements to slow!");
             return false;
         } 
-        dirty = true;
+
+                //Clone list is { new_pos => (clone-this-pos)}
+        HashMap<Position, Position> clone_list =  new HashMap<Position, Position>();
+        HashMap<Position, Material> set_list = new HashMap<Position, Material>();
+        
         Movement update = new Movement(this);
         update.core_block = core_block;
         update.movement = movement;
@@ -155,11 +156,11 @@ public class Boat implements Runnable{
             if(blocks.containsKey(newpos)
                     || BoatMod.contains_material(newpos.getRelative(core_block.getBlock()).getType(), BoatMod.movableSpace)
                     ) {
-                update.clone_list.put(newpos, pos);
+                clone_list.put(newpos, pos);
                 if(pos.getY() <= water_line) {
-                    update.set_list.put(pos, Material.STATIONARY_WATER);
+                    set_list.put(pos, Material.STATIONARY_WATER);
                 } else {
-                    update.set_list.put(pos, Material.AIR);
+                   set_list.put(pos, Material.AIR);
                 }
             } else {
                 //Collision!
@@ -169,13 +170,26 @@ public class Boat implements Runnable{
             }
             update.unset_list.add(pos);
         }
-        update.clean();
-        update.build_positions();
+        
+        //Build lists to update:
+        
+        for(Position p : clone_list.keySet()) {
+            set_list.remove(p); //Remove this block from the set list
+            update.clone_list.add(new Position2(p, clone_list.get(p)));
+        }
+        
+        for(Position p : set_list.keySet()) {
+            update.set_list.add(new PositionMaterial(p, set_list.get(p)));
+        }
+        
+        Collections.sort(update.clone_list);
+        Collections.sort(update.set_list,Collections.reverseOrder()); //Sort in reverse, we want to set stuff above first
         
         position.add(movement);
         core_block = movement.getRelative(core_block.getBlock()).getState();
         
         
+        dirty = true;
         plugin.movments.push(update);
         return true;
     }
@@ -259,8 +273,10 @@ public class Boat implements Runnable{
                    engine_momentum.getX()%movement_cost,
                    0,
                    engine_momentum.getZ()%movement_cost);
-            //Move!
-            move(new Position(x, 0, z));
+            if(x != 0 || z != 0) {
+                //Move!
+                move(new Position(x, 0, z));
+            }
         } else {
             //Stop totaly if no engine are on
             engine_momentum.setX(0);
@@ -427,69 +443,68 @@ public class Boat implements Runnable{
         }
     }
     
+    /*
+     * Contains two positions, sorted by the first
+     */
+    static class Position2 implements Comparable<Position2> {
+        public Position p1,p2;
+        
+        public Position2(Position pos1, Position pos2) {
+            p1 = pos1;
+            p2 = pos2;
+        }
+        
+        public int compareTo(Position2 p) {
+            return p1.compareTo(p.p1);
+        }
+    }
+    
+    static class PositionMaterial {
+        public Position pos;
+        public Material mtl;
+        
+        public PositionMaterial(Position p, Material m ){
+            pos = p;
+            mtl = m;
+        }
+    }
+    
     class Movement {
-        //Clone list is { new_pos => (clone-this-pos)}
-        public HashMap<Position, Position> clone_list =  new HashMap<Position, Position>();
-        public HashMap<Position, Material> set_list = new HashMap<Position, Material>();
-        public HashSet<Position> unset_list = new HashSet<Position>();
+
         public BlockState core_block;
         public Boat boat;
         public Position movement;
-        private TreeSet<Position> positions = new TreeSet<Position>();
+        public ArrayList<Position2> clone_list = new ArrayList<Position2>(); //Clone these positions
+        public ArrayList<PositionMaterial> set_list = new ArrayList<PositionMaterial>(); //Set these positions to these materials
+        public HashSet<Position> unset_list = new HashSet<Position>();
 
         
         Movement(Boat b) {
             boat = b;
         }
         
-        
-        void clean() {
-            for(Position p : clone_list.keySet()) {
-                set_list.remove(p);
-                unset_list.remove(p);
-            }
-        }
-        
-        void debug() {
-            plugin.log.info("Boat.Movement:\nClone list:");
-            for(Position p : clone_list.keySet()) {
-                plugin.log.info(clone_list.get(p) + " => "+p);
-            }
-            plugin.log.info("Set_list:");
-            for(Position p : set_list.keySet()) {
-                plugin.log.info(p + " to "+set_list.get(p));
-            }
-            plugin.log.info("unset_list:");
-            for(Position p : unset_list) {
-                plugin.log.info(p.toString());
-            }
-            plugin.log.info("----------");
-        }
-        
-        void build_positions() {
-            positions.addAll(clone_list.keySet());
-            positions.addAll(set_list.keySet());
-        }
-        
         //Execute the movement, must be run from synchronized thread
         void execute(BoatMod plugin) {
             if(debug_movement) {
                 plugin.log.info("Moving boat "+boat.toString());
-                debug();
             }
             HashMap<Position, BlockData> blockdata = new HashMap<Position, BlockData>();
             
             Block core = core_block.getBlock();
             
             //Save data
-            for(Position p : clone_list.values()) {
-                Block b = p.getRelative(core);
-                blockdata.put(p, new BlockData(b));
+            for(Position2 p2 : clone_list) {
+                Block b = p2.p2.getRelative(core);
+                blockdata.put(p2.p2, new BlockData(b));
                 if(debug_movement)
-                    plugin.log.info("Save: "+p+" is "+b.getType().name());
+                    plugin.log.info("Save: "+p2.p2+" is "+b.getType().name());
             }
             
-            for(Position p : clone_list.values()) {
+            
+            //Run the clone list in reverse:
+            for(int i=clone_list.size()-1;i>=0;--i) {
+                Position p = clone_list.get(i).p2;
+                
                 Block b = p.getRelative(core);
                 //Remove the block
                 //I do this to prevent errors with block not allowed to be next to each other
@@ -508,37 +523,31 @@ public class Boat implements Runnable{
             
             byte zero = 0;
             
-            //Write data
-            for(Position p : positions) {
-                Position clone_pos = clone_list.get(p);
-                
-                if(clone_pos != null) {
-                    Block to = p.getRelative(core);
-                    BlockData from = blockdata.get(clone_pos);
+            for(Position2 pos : clone_list) {
+                Block to = pos.p1.getRelative(core);
+                BlockData from = blockdata.get(pos.p2);
 
-                    //Clear inventory of to:
-                    if(to.getState() instanceof InventoryHolder) {
-                        InventoryHolder ih = (InventoryHolder) to.getState();
-                        ih.getInventory().clear();
-                    }
-                    if(debug_movement)
-                        plugin.log.info("Set "+p+" to "+Material.getMaterial(from.type).name());
-                    from.set(to);
-                    //Update boat data:
-                    plugin.belonging.put(clone_pos, boat);
-                } else {
-                    Material set_mtl = set_list.get(p);
-                    if(set_mtl != null) {
-                        BlockState block = p.getRelative(core).getState();
-                        if(block instanceof InventoryHolder) {
-                            InventoryHolder ih = (InventoryHolder) block;
-                            ih.getInventory().clear();
-                        }
-                        block.setData(new MaterialData(0));
-                        block.setType(set_mtl);
-                        block.update(true);
-                    }
+                //Clear inventory of to:
+                if(to.getState() instanceof InventoryHolder) {
+                    InventoryHolder ih = (InventoryHolder) to.getState();
+                    ih.getInventory().clear();
                 }
+                if(debug_movement)
+                    plugin.log.info("Set "+pos.p1+" to "+Material.getMaterial(from.type).name());
+                from.set(to);
+                //Update boat data:
+                plugin.belonging.put(pos.p2, boat);
+            }
+            
+            for(PositionMaterial pm : set_list) {
+                BlockState block = pm.pos.getRelative(core).getState();
+                if(block instanceof InventoryHolder) {
+                    InventoryHolder ih = (InventoryHolder) block;
+                    ih.getInventory().clear();
+                }
+                block.setData(new MaterialData(0));
+                block.setType(pm.mtl);
+                block.update(true);
             }
             
             
