@@ -3,7 +3,7 @@ package com.torandi.boatmod;
 
 
 public class BoatRunner implements Runnable {
-    public static long RUNNER_DELAY = 10L;
+    public static long RUNNER_DELAY = 5L;
     
     
     private BoatMod plugin;
@@ -16,11 +16,9 @@ public class BoatRunner implements Runnable {
     public void run() {
         for(Boat.Movement mov : plugin.movments) {
             mov.execute(plugin);
+            mov.boat.dirty = false;
         }
         plugin.movments.clear();
-      /* for(Boat b : plugin.boats) {
-            b.update_speed_signs();
-        }*/
     }
     
 }

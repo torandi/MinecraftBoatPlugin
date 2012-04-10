@@ -19,10 +19,13 @@ public class BoatMod extends JavaPlugin implements Listener {
     ArrayList<Boat> boats;
     
     //Stores which block belongs to which boat:
-    HashMap<Position, Boat> belonging; 
+    HashMap<Position, Boat> belonging;
+    //Store rotation engines on which we should detect rising edge:
+    HashMap<Position, Boat.Engine> rotational_engines;
     
     LinkedList<Boat.Movement> movments; //Movements to execute
     
+    int boat_runner_task_id=-1;
     
     /**
      * Blocks to use when searching for constructor
@@ -39,6 +42,7 @@ public class BoatMod extends JavaPlugin implements Listener {
     
     static Material[] signMaterial = {Material.SIGN, Material.SIGN_POST};
     static Material[] engineMaterials = {Material.IRON_BLOCK};
+    static Material[] furnaceMaterials = {Material.FURNACE, Material.BURNING_FURNACE };
     
     static int constructor_surround[][] = {{1,0}, {0,1}, {-1, 0}, {0, -1}};
     
@@ -83,10 +87,11 @@ public class BoatMod extends JavaPlugin implements Listener {
         boats = new ArrayList<Boat>();
         belonging  = new HashMap<Position, Boat>();
         movments = new LinkedList<Boat.Movement>();
-
+        rotational_engines = new HashMap<Position, Boat.Engine>();
+        
         log.info("Enabled BoatMod.");
         getServer().getPluginManager().registerEvents(this, this);
-        getServer().getScheduler().scheduleSyncRepeatingTask(this, new BoatRunner(this) , BoatRunner.RUNNER_DELAY, BoatRunner.RUNNER_DELAY);
+        boat_runner_task_id = getServer().getScheduler().scheduleSyncRepeatingTask(this, new BoatRunner(this) , BoatRunner.RUNNER_DELAY, BoatRunner.RUNNER_DELAY);
     }
 
     @Override
@@ -163,7 +168,9 @@ public class BoatMod extends JavaPlugin implements Listener {
 
     @Override
     public void onDisable() {
+        getServer().getScheduler().cancelTasks(this);
         log.info("Disabled BoatMod.");
+        //TODO: Save boats, stop boats
     }
     
     @EventHandler
@@ -225,7 +232,7 @@ public class BoatMod extends JavaPlugin implements Listener {
                     
             } 
         }
-    }
+    } 
     
     /**
      * Tries to find a adjacent block to the given block of the given material
@@ -243,6 +250,12 @@ public class BoatMod extends JavaPlugin implements Listener {
         return null;
     }
     
+    /**
+     * Checks if mat is one of the materials in materials
+     * @param mat Material to check for
+     * @param materials List to check in
+     * @return true if material is in list
+     */
     public static boolean contains_material(Material mat, Material[] materials) {
         for(Material m : materials) {
             if(mat.equals(m))

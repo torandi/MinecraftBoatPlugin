@@ -2,6 +2,7 @@ package com.torandi.boatmod;
 
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
+import org.bukkit.util.Vector;
 
 public class Position implements Comparable<Position> {
     private int x, y, z;
@@ -18,6 +19,23 @@ public class Position implements Comparable<Position> {
         return new Position(b.getX() - relativeTo.getX(),
                 b.getY() - relativeTo.getY(),
                 b.getZ() - relativeTo.getZ());
+    }
+    
+    //Performs floor to make the number closer to 0
+    public static int fullfloor(double f) {
+        return (int) Math.signum(f)*absfloor(f);
+    }
+    
+    public static int absfloor(double f) {
+        return (int) Math.floor(Math.abs(f));
+    }
+    
+    public static Position fromVector(Vector v) {
+        return new Position(fullfloor(v.getX()), fullfloor(v.getY()), fullfloor(v.getZ()));
+    }
+    
+    public static Position fromVectorAsBlock(Vector v) {
+        return new Position(v.getBlockX(), v.getBlockY(), v.getBlockZ());
     }
      
     public Position(int x, int y, int z) {
@@ -52,6 +70,18 @@ public class Position implements Comparable<Position> {
         return new Position(x + p.x, y + p.y, z + p.z);
     }
 
+    public void setX(int x) {
+        this.x = x;
+    }
+
+    public void setY(int y) {
+        this.y = y;
+    }
+
+    public void setZ(int z) {
+        this.z = z;
+    }
+
     public int getX() {
         return x;
     }
@@ -70,6 +100,10 @@ public class Position implements Comparable<Position> {
     
     public int hashCode() {
         return x ^ y ^ z;
+    }
+    
+    public Vector toVector() {
+        return new Vector(x, y, z);
     }
 
     @Override

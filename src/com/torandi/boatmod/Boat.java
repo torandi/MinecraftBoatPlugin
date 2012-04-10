@@ -1,17 +1,23 @@
 
 package com.torandi.boatmod;
 
+import com.torandi.boatmod.Boat.Engine.EngineError;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.TreeSet;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.Furnace;
 import org.bukkit.block.Sign;
 import org.bukkit.entity.Player;
+import org.bukkit.event.player.PlayerTeleportEvent.TeleportCause;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.material.MaterialData;
@@ -19,16 +25,17 @@ import org.bukkit.util.Vector;
 
 
 public class Boat implements Runnable{
-    public final static long RUN_DELAY = 10L;
-    public final static float ENGINE_POWER = 5.f;
-    public final static float MAX_SPEED = 5;
-    public final static float MAX_ROT_SPEED = 1;
-    public final static float WATER_FRICTION = 0.4f;
+    public final static long RUN_DELAY = 10L; //server ticks / boat tick
+    private final static float ENGINE_POWER = 10; //The weigth one engine can move per tick
+    
+    private final static boolean debug_movement = false;
     
     static enum EngineType {
         DIRECTIONAL,
         ROTATIONAL
     };
+    
+    public boolean dirty = false; //Set to true if it has movements that are not yet executed
     
     private BoatMod plugin;
     private Player creator;
@@ -38,24 +45,28 @@ public class Boat implements Runnable{
     private HashMap<Position, BlockData> blocks;
     
     private int inWater = 0;
-    private int weigth = 0;
-    private Vector speed = new Vector();
-    private float rot_speed = 0;
     
     private int max_x=Integer.MIN_VALUE, max_y=Integer.MIN_VALUE, max_z=Integer.MIN_VALUE;
     private int min_x= Integer.MAX_VALUE, min_y=Integer.MAX_VALUE, min_z=Integer.MAX_VALUE;
     
+    private Position min, max;
+    
     private int water_line = Integer.MIN_VALUE;
+    private int weigth = 0;
+    private int movement_cost;
+    
+    private Position engine_momentum;
     
     
     private ArrayList<Engine> engines;
-    private ArrayList<Position> speed_signs; //Update signs at these position with speed data
+    private ArrayList<Position> info_signs; //Update signs at these position with info
     
     public Boat(BoatMod plugin, Block core, Block connector) throws BoatError {
         
         blocks = new HashMap<Position, BlockData>();
         engines = new ArrayList<Engine>();
-        speed_signs = new ArrayList<Position>();
+        info_signs = new ArrayList<Position>();
+        engine_momentum = new Position(0, 0, 0);
         
         this.plugin = plugin;
         position = Position.fromBlock(core);
@@ -68,6 +79,11 @@ public class Boat implements Runnable{
             destroy();
             throw new BoatError();
         }
+        
+        min = new Position(min_x, min_y, min_z);
+        max = new Position(max_x, max_y, max_z);
+        
+        movement_cost = (int)Math.ceil(weigth/ENGINE_POWER);
     }
     
     public final void addBlock(Block b) {
@@ -78,11 +94,14 @@ public class Boat implements Runnable{
                 ++inWater;
         }
         
-        if(b.getType().equals(Material.FURNACE) || b.getType().equals(Material.BURNING_FURNACE)) {
+        if(BoatMod.contains_material(b.getType(), BoatMod.furnaceMaterials)) {
             Engine e;
             try {
                 plugin.log.info("Found engine at "+pos+", powered: "+b.isBlockIndirectlyPowered());
                 e = new Engine(pos);
+                if(e.isRotational()) {
+                    plugin.rotational_engines.put(e.getRealPosition(), e);
+                }
                 plugin.log.info("Type: "+e.getType()+", Direction: "+e.getDirection());
                 engines.add(e);
             } catch (BoatError ex) {}
@@ -90,12 +109,20 @@ public class Boat implements Runnable{
         
         if(BoatMod.contains_material(b.getType(), BoatMod.signMaterial)) {
             Sign sign = (Sign)b.getState();
-            if(sign.getLine(0).toLowerCase().startsWith("speed")) {
-                plugin.log.info("Found speed sign");
-                speed_signs.add(pos);
+            if(sign.getLine(0).toLowerCase().startsWith("info")) {
+                plugin.log.info("Found info sign");
+                info_signs.add(pos);
             }
         }
        
+        min_x = Math.min(min_x, pos.getX());
+        min_y = Math.min(min_y, pos.getY());
+        min_z = Math.min(min_z, pos.getZ());
+
+        max_x = Math.max(max_x, pos.getX());
+        max_y = Math.max(max_y, pos.getY());
+        max_z = Math.max(max_z, pos.getZ());
+        
         ++weigth;
         
         blocks.put(pos, data);
@@ -112,10 +139,16 @@ public class Boat implements Runnable{
         }
     }
     
-    public boolean move(Position movement) {     
+    public boolean move(Position movement) {  
+        if(dirty) {
+            plugin.log.warning("Trying to move again before previous movement has executed! Performing movements to slow!");
+            return false;
+        } 
+        dirty = true;
         Movement update = new Movement(this);
         update.core_block = core_block;
-        
+        update.movement = movement;
+
         
         for(Position pos : blocks.keySet()) {
             Position newpos = pos.add(movement);
@@ -131,37 +164,32 @@ public class Boat implements Runnable{
             } else {
                 //Collision!
                 plugin.log.info("COLLISION!");
-                speed = speed.zero();
                 //TODO: Handle
                 return false;
             }
             update.unset_list.add(pos);
         }
         update.clean();
+        update.build_positions();
         
         position.add(movement);
         core_block = movement.getRelative(core_block.getBlock()).getState();
         
+        
         plugin.movments.push(update);
         return true;
-    }
-    
-    public void accelerate(Position dir) {
-        Vector acc = new Vector(dir.getX(), dir.getY(), dir.getZ());
-        acc.multiply(ENGINE_POWER/log2(weigth));
-        
-        speed.add(acc);
-    }
-    
-    //direction = -1/1
-    public void increase_rotation(int direction) {
-        rot_speed+=ENGINE_POWER/log2(weigth);
     }
      
     /**
      * Unlinks this boat
      */
     public final void destroy() {
+        //Remove rotational engines:
+        for(Engine e : engines) {
+            if(e.isRotational()) {
+                plugin.rotational_engines.remove(e.getRealPosition());
+            }
+        }
         for(Position p : blocks.keySet()) {
             if(plugin.belonging.remove(p.getRelative(position)) != this)
                 plugin.log.warning("Warning! Unlinked block from boat that was in another boat!");
@@ -194,56 +222,56 @@ public class Boat implements Runnable{
         return true;
     }
     
+    @Override
     public String toString() {
         return "{ Boat, weigth: "+weigth+", in water: "+inWater+" }";
-    }
-
-    private float log2(float x) {
-        return (float)(Math.log(x)/Math.log(2));
     }
     
     @Override
     public void run() {
+        int rotation = 0;
+        boolean any_directional = false;
+        
         for(Engine e : engines) {
-            e.run();
+            if(e.run()) {
+                plugin.log.info("Engine is on: "+e.getDirection());
+                if(e.isDirectional()) {
+                    engine_momentum =  engine_momentum.add(e.getDirection());
+                    any_directional = true;
+                } else if(e.isRotational()) {
+                    rotation += e.getRotation();
+                }
+            }
         }
         
-        //Water friction:
-        float friction = 1.f/(log2(weigth)*WATER_FRICTION);
-        if(friction > 0.99f)
-            friction = 0.99f;
-        if(speed.lengthSquared() < 0.01) 
-            speed = speed.zero();
-        else {
-            speed.multiply(friction);
-        }
-        
-        if(Math.abs(rot_speed) < 0.01) {
-            rot_speed = 0.f;
+        if(any_directional) {
+            int x=0;
+            int z=0;
+            if(Math.abs(engine_momentum.getX()) >= movement_cost ) {
+                x=(int) Math.signum(engine_momentum.getX());
+            }
+            if(Math.abs(engine_momentum.getZ()) >= movement_cost ) {
+                z=(int) Math.signum(engine_momentum.getZ());
+            }
+            
+            //Remove current movement, keep overflow, but never more than movement_cost:
+            engine_momentum = new Position(
+                   engine_momentum.getX()%movement_cost,
+                   0,
+                   engine_momentum.getZ()%movement_cost);
+            //Move!
+            move(new Position(x, 0, z));
         } else {
-            rot_speed *=friction;
+            //Stop totaly if no engine are on
+            engine_momentum.setX(0);
+            engine_momentum.setZ(0);
         }
         
-        if(Math.abs(speed.getX()) > MAX_SPEED)
-            speed.setX(MAX_SPEED*Math.signum(speed.getX()));
-        if(Math.abs(speed.getY()) > MAX_SPEED)
-            speed.setY(MAX_SPEED*Math.signum(speed.getY()));
-        if(Math.abs(speed.getZ()) > MAX_SPEED)
-            speed.setZ(MAX_SPEED*Math.signum(speed.getZ()));
-        if(Math.abs(rot_speed) > MAX_ROT_SPEED)
-            rot_speed = Math.signum(rot_speed) * MAX_ROT_SPEED;
         
-        if(Math.abs(speed.getBlockX()) > 0 
-                || Math.abs(speed.getBlockY()) > 0 
-                || Math.abs(speed.getBlockZ()) > 0) {
-            move(new Position(speed.getBlockX(), speed.getBlockY(), speed.getBlockZ()));
-        }
-        DecimalFormat df = new DecimalFormat("#.##");
-        plugin.log.info("Speed "+df.format(speed.getX())+", "+df.format(speed.getZ()));
     }
     
-    public void update_speed_signs() {
-        DecimalFormat df = new DecimalFormat("#.##");
+    public void update_info_signs() {
+       /* DecimalFormat df = new DecimalFormat("#.##");
         plugin.log.info("Update speed signs: "+df.format(speed.getX())+", "+df.format(speed.getZ()));
         for(Position p : speed_signs) {
             Sign sign = (Sign) p.getRelative(core_block.getBlock()).getState();
@@ -252,7 +280,7 @@ public class Boat implements Runnable{
             sign.setLine(2, "Rotation speed:");
             sign.setLine(3, df.format(rot_speed).toString());
             sign.update();
-        }
+        }*/
     }
     
     static class BlockData {
@@ -265,10 +293,24 @@ public class Boat implements Runnable{
     
     class Engine {
 
+      
+        //Is set to true if a rising edge is detected by an redstone event,
+        //  should be reset after usage.
+        //  Only relevant for rotational engine
+        boolean rising_edge = false;
+            
         public Position getDirection() {
             return direction;
         }
+        
+        public int getRotation() {
+            return direction.getY();
+        }
 
+        public Position getRealPosition() {
+            return pos.getRelative(position);
+        }
+        
         public Position getPosition() {
             return pos;
         }
@@ -276,7 +318,21 @@ public class Boat implements Runnable{
         public EngineType getType() {
             return type;
         }
+        
+        public boolean isDirectional() {
+            return type == EngineType.DIRECTIONAL;
+        }
        
+        public boolean isRotational() {
+            return type == EngineType.ROTATIONAL;
+        }
+        
+        //Returns rising edge and resets it
+        public boolean getRisingEdge() {
+            boolean tmp = rising_edge;
+            rising_edge = false; //Reset
+            return tmp;
+        }
         
         private Position pos;
         private Position direction;
@@ -301,24 +357,34 @@ public class Boat implements Runnable{
             return pos.getRelative(core_block.getBlock());
         }
         
-        Furnace getFurnace() {
-            return (Furnace)pos.getRelative(core_block.getBlock()).getState();
-        }
-        
-        /*
-         * Checks if powered and if so executes the action it should do
-         */
-        void run() {
-            if(getFurnaceBlock().isBlockIndirectlyPowered() && burn() ) {
-                if(type == EngineType.DIRECTIONAL) {
-                    accelerate(direction);
-                } else {
-                    increase_rotation(direction.getY());
-                }
+        Furnace getFurnace() throws EngineError {
+            BlockState state = pos.getRelative(core_block.getBlock()).getState();
+            if(state instanceof Furnace) {
+                return (Furnace)state;
+            } else {
+                throw new EngineError("No longer a furnace");
             }
         }
         
-        boolean burn() {
+        /*
+         * Checks if powered and makes sure it is burning
+         * @return True if the engine is running.
+         * @throws EngineError if the engine has moved
+         */
+        boolean run() {
+            try {
+                if(isDirectional()) {
+                    return getFurnaceBlock().isBlockIndirectlyPowered() && burn();
+                } else {//Rotational 
+                    return getRisingEdge() && burn();
+                }
+            } catch(EngineError e) {
+                plugin.log.warning("Caught EngineError: "+e.getMessage());
+                return false;
+            }
+        }
+        
+        boolean burn() throws EngineError {
             Furnace f = getFurnace();
             if(f.getBurnTime() > 0)
                 return true;
@@ -351,6 +417,14 @@ public class Boat implements Runnable{
                 return  (short) (i == Material.WOOD.getId() ? 300 : (i == Material.STICK.getId() ? 100 : (i == Material.COAL.getId() ? 1600 : (i == Material.LAVA_BUCKET.getId() ? 20000 : (i == Material.SAPLING.getId() ? 100 : (i == Material.BLAZE_ROD.getId() ? 2400 : 0))))));
             }
         }
+        
+        class EngineError extends Exception {
+
+            private EngineError(String string) {
+                super(string);
+            }
+            
+        }
     }
     
     class Movement {
@@ -360,6 +434,9 @@ public class Boat implements Runnable{
         public HashSet<Position> unset_list = new HashSet<Position>();
         public BlockState core_block;
         public Boat boat;
+        public Position movement;
+        private TreeSet<Position> positions = new TreeSet<Position>();
+
         
         Movement(Boat b) {
             boat = b;
@@ -386,14 +463,21 @@ public class Boat implements Runnable{
             for(Position p : unset_list) {
                 plugin.log.info(p.toString());
             }
+            plugin.log.info("----------");
+        }
+        
+        void build_positions() {
+            positions.addAll(clone_list.keySet());
+            positions.addAll(set_list.keySet());
         }
         
         //Execute the movement, must be run from synchronized thread
         void execute(BoatMod plugin) {
-            plugin.log.info("Moving boat "+boat.toString());
-            debug();
+            if(debug_movement) {
+                plugin.log.info("Moving boat "+boat.toString());
+                debug();
+            }
             HashMap<Position, BlockData> blockdata = new HashMap<Position, BlockData>();
-            TreeSet<Position> positions = new TreeSet<Position>();
             
             Block core = core_block.getBlock();
             
@@ -401,7 +485,8 @@ public class Boat implements Runnable{
             for(Position p : clone_list.values()) {
                 Block b = p.getRelative(core);
                 blockdata.put(p, new BlockData(b));
-                plugin.log.info("Save: "+p+" is "+b.getType().name());
+                if(debug_movement)
+                    plugin.log.info("Save: "+p+" is "+b.getType().name());
             }
             
             for(Position p : clone_list.values()) {
@@ -419,8 +504,6 @@ public class Boat implements Runnable{
                 s.update(true);
             }
             
-            positions.addAll(clone_list.keySet());
-            positions.addAll(set_list.keySet());
             
             
             byte zero = 0;
@@ -438,7 +521,8 @@ public class Boat implements Runnable{
                         InventoryHolder ih = (InventoryHolder) to.getState();
                         ih.getInventory().clear();
                     }
-                    plugin.log.info("Set "+p+" to "+Material.getMaterial(from.type).name());
+                    if(debug_movement)
+                        plugin.log.info("Set "+p+" to "+Material.getMaterial(from.type).name());
                     from.set(to);
                     //Update boat data:
                     plugin.belonging.put(clone_pos, boat);
@@ -454,6 +538,24 @@ public class Boat implements Runnable{
                         block.setType(set_mtl);
                         block.update(true);
                     }
+                }
+            }
+            
+            
+            List<Player> players = core_block.getWorld().getPlayers();
+            
+            Vector v_min, v_max;
+            v_min = min.add(position).toVector();
+            v_max = max.add(position).toVector();
+            v_max.setY(v_max.getY()+10);//Include some of the air above
+            
+            for(Player p : players) {
+                if(p.getLocation().toVector().isInAABB(v_min, v_max)) {
+                    plugin.log.info("Move player "+p.getDisplayName());
+                    Location newLocation = p.getLocation().add(movement.toVector());
+                    p.teleport(newLocation, TeleportCause.PLUGIN);
+                } else {
+                    plugin.log.info("Don't move player "+p.getDisplayName());
                 }
             }
                 
